@@ -10,6 +10,7 @@ Como usar:
 
 
 Funcionalidades implementadas:
+
 KD-Tree com suporte para:
 
 inserção de registros: embedding facial (128 floats) + identificador (100 caracteres).
