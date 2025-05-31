@@ -4,25 +4,14 @@ Trabalho 1 - Reconhecimento Facial com KD-Tree
 Funcionalidades implementadas
 
 Como usar:
-
-gcc (para compilar a biblioteca C)
-
-python >=3.8
-
-pip
-
-uvicorn, fastapi, pydantic, numpy
+1. Compilar o código em C: gcc -fPIC -shared -o libkdtree.so kdtree.c -lm
+2. Execute: pip install fastapi uvicorn numpy pydantic
 
 
 
-Inserção de registros contendo:
+Funcionalidades implementadas:
+KD-Tree com suporte para:
 
-embedding facial: vetor de 128 floats.
+inserção de registros: embedding facial (128 floats) + identificador (100 caracteres).
 
-identificador: string de até 100 caracteres.
-
-Implementação da busca dos K vizinhos mais próximos utilizando:
-
-Estratégia de poda típica da KD-Tree.
-
-Utilização de MinHeap para manter os K menores vizinhos.
+busca KNN: busca eficiente dos K vizinhos mais próximos utilizando MinHeap.
