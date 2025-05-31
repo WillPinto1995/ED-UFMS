@@ -1,7 +1,7 @@
 # ED-UFMS
 Estruturas de Dados UFMS 
 Trabalho 1 - Reconhecimento Facial com KD-Tree
-Funcionalidades implementadas
+
 
 Como usar:
 1. Compilar o código em C: gcc -fPIC -shared -o libkdtree.so kdtree.c -lm
