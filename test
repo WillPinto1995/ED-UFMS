@@ -1,0 +1,81 @@
+import requests
+import numpy as np
+import pandas as pd
+from typing import Tuple
+
+BASE_URL = "http://127.0.0.1:8000"
+
+def load_embeddings(file_path: str = "embeddings.parquet") -> Tuple[list, list]:
+    """Carrega embeddings do arquivo parquet"""
+    df = pd.read_parquet(file_path)
+    embeddings = [
+        emb.tolist() if isinstance(emb, np.ndarray) else emb 
+        for emb in df["emb"]
+    ]
+    return df["person_name"].tolist(), embeddings
+
+class FaceAPITester:
+    def __init__(self, base_url: str = BASE_URL):
+        self.base_url = base_url
+    
+    def test_build_tree(self):
+        """Testa construção da árvore"""
+        response = requests.post(f"{self.base_url}/build-tree")
+        response.raise_for_status()
+        return response.json()
+    
+    def test_insert_face(self, embedding: list, person_name: str):
+        """Testa inserção de face"""
+        if isinstance(embedding, np.ndarray):
+            embedding = embedding.tolist()
+        
+        payload = {
+            "embedding": embedding,
+            "id": person_name
+        }
+        
+        response = requests.post(
+            f"{self.base_url}/insert-face",
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def test_search_faces(self, query_embedding: list, n: int = 5):
+        """Testa busca por faces similares"""
+        response = requests.post(
+            f"{self.base_url}/search-faces",
+            json=query_embedding,
+            params={"n": n}
+        )
+        response.raise_for_status()
+        return response.json()
+
+def run_all_tests():
+    print("=== Iniciando testes da API ===\n")
+    tester = FaceAPITester()
+    
+    # Carrega dados
+    names, embeddings = load_embeddings()
+    
+    # 1. Testa construção da árvore
+    print("1. Testando construção da árvore...")
+    print("Resultado:", tester.test_build_tree())
+    
+    # 2. Testa inserção de faces
+    print("\n2. Testando inserção de faces...")
+    for i, (name, emb) in enumerate(zip(names, embeddings)):
+        if i >= 100:  # Limita a 100 inserções para teste
+            break
+        print(f"Inserindo face {i+1} - {name[:20]}...", end=" ")
+        print(tester.test_insert_face(emb, name))
+    
+    # 3. Testa busca por faces similares
+    print("\n3. Testando busca de faces...")
+    results = tester.test_search_faces(embeddings[0])
+    print("Top 5 resultados:")
+    for i, res in enumerate(results, 1):
+        print(f"{i}. {res['id']} (similaridade: {res['similarity']:.2f})")
+
+if __name__ == "__main__":
+    run_all_tests()
