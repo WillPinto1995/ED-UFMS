@@ -1,64 +1,55 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-from kdtree_wrapper import lib, TReg
+import ctypes
 from ctypes import c_float, c_char
+from kdtree_wrapper import KDTreeWrapper
 
-app = FastAPI()
+app = FastAPI(title="Facial Recognition API")
 
-# =====================================
-# Modelo de entrada para API
-# =====================================
+# Inicializa o wrapper da KDTree
+kdtree = KDTreeWrapper()
 
-class PessoaEntrada(BaseModel):
-    embedding: List[float]  # Vetor de 128 floats
-    nome: str               # Nome ou identificador
+# Modelos Pydantic para validação
+class FaceInput(BaseModel):
+    embedding: List[float]
+    id: str
 
-class ConsultaEntrada(BaseModel):
-    embedding: List[float]  # Vetor de 128 floats
-    k: int = 2              # Número de vizinhos
+class FaceSearchResult(BaseModel):
+    id: str
+    similarity: float
 
-# =====================================
-# Rotas da API
-# =====================================
+@app.on_event("startup")
+def startup_event():
+    """Inicializa a KDTree quando a API começa"""
+    kdtree.initialize()
 
-@app.post("/construir-arvore")
-def construir_arvore():
-    lib.kdtree_construir()
-    return {"mensagem": "Árvore KD construída com sucesso."}
+@app.post("/build-tree", summary="Constroi a árvore KD")
+def build_tree():
+    try:
+        kdtree.build_tree()
+        return {"message": "KDTree construída com sucesso"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/inserir")
-def inserir_pessoa(pessoa: PessoaEntrada):
-    emb_array = (c_float * 128)(*pessoa.embedding)
-    nome_bytes = pessoa.nome.encode('utf-8')[:99]
-    novo_ponto = TReg(embedding=emb_array, nome=nome_bytes)
-    lib.inserir_ponto(novo_ponto)
-    return {"mensagem": f"Pessoa '{pessoa.nome}' inserida com sucesso."}
+@app.post("/insert-face", summary="Insere uma face na árvore")
+def insert_face(face: FaceInput):
+    try:
+        if len(face.embedding) != 128:
+            raise ValueError("Embedding deve ter 128 dimensões")
+        
+        kdtree.insert_face(face.embedding, face.id)
+        return {"message": f"Face '{face.id}' inserida com sucesso"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/buscar")
-def buscar_vizinhos(consulta: ConsultaEntrada):
-    emb_array = (c_float * 128)(*consulta.embedding)
-    nome_bytes = b"consulta"
-    consulta_ponto = TReg(embedding=emb_array, nome=nome_bytes)
-    
-    # Chamada para C: supondo função lib.buscar_n_proximos(arvore, TReg, k)
-    arvore = lib.get_tree()
-    resultados = lib.buscar_n_proximos(arvore, consulta_ponto, consulta.k)
-
-    vizinhos = []
-    for i in range(consulta.k):
-        vizinho = resultados[i]
-        nome = bytes(vizinho.nome).decode('utf-8').rstrip('\x00')
-        vizinhos.append({
-            "nome": nome
-            # Opcional: incluir embedding, mas normalmente não é necessário expor.
-        })
-
-    return {
-        "consulta": consulta.nome if hasattr(consulta, "nome") else "Consulta",
-        "vizinhos": vizinhos
-    }
-
-@app.get("/")
-def home():
-    return {"mensagem": "API de Reconhecimento Facial com KD-Tree ativa!"}
+@app.post("/search-faces", summary="Busca faces similares", response_model=List[FaceSearchResult])
+def search_faces(embedding: List[float], n: int = 5):
+    try:
+        if len(embedding) != 128:
+            raise ValueError("Embedding deve ter 128 dimensões")
+        
+        results = kdtree.search_faces(embedding, n)
+        return [{"id": r[0], "similarity": r[1]} for r in results]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
