@@ -1,251 +1,277 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <float.h>
 #include <string.h>
-#include <math.h>
+#include <assert.h>
 
-/* =======================================
-   Estrutura que representa um indivíduo
-   ======================================= */
-typedef struct {
-    float features[128];   // Vetor de características (embedding facial)
-    char nome[100];        // Identificação
-} Pessoa;
-
-/* =======================================
-   Estrutura do Nó da Árvore KD
-   ======================================= */
-typedef struct KDNo {
-    Pessoa* pessoa;
-    struct KDNo* esquerda;
-    struct KDNo* direita;
-} KDNo;
-
-/* =======================================
-   Estrutura da Árvore KD
-   ======================================= */
-typedef struct {
-    KDNo* raiz;
-    int dimensao;  // Sempre 128 neste caso
-} KDArvore;
-
-/* =======================================
-   Estruturas da MinHeap
-   ======================================= */
-typedef struct {
-    double distancia;
-    Pessoa* pessoa;
-} ElementoHeap;
+// ==================== ESTRUTURAS DE DADOS ====================
 
 typedef struct {
-    ElementoHeap* elementos;
-    int capacidade;
-    int tamanho;
-} MinHeap;
+    float embedding[128];  // Vetor de características da face
+    char id[100];          // Identificador da pessoa (99 chars + null terminator)
+} FaceRegistro;
 
-/* =======================================
-   Funções Auxiliares Gerais
-   ======================================= */
+typedef struct TreeNode {
+    void *key;                  // Ponteiro para FaceRegistro
+    struct TreeNode *esq;       // Subárvore esquerda
+    struct TreeNode *dir;       // Subárvore direita
+} TreeNode;
 
-// Calcula a distância euclidiana ao quadrado
-double calcular_distancia(Pessoa* p1, Pessoa* p2) {
+typedef struct {
+    TreeNode *raiz;             // Raiz da árvore
+    int (*comparador)(void*, void*, int);  // Função de comparação
+    double (*distancia)(void*, void*);     // Função de distância
+    int dimensoes;             // Número de dimensões (k)
+} KDTree;
+
+// ==================== FUNÇÕES AUXILIARES ====================
+
+// Aloca e inicializa um novo registro de face
+FaceRegistro* criar_registro(float embedding[128], const char id[]) {
+    FaceRegistro *reg = malloc(sizeof(FaceRegistro));
+    if (!reg) return NULL;
+    
+    memcpy(reg->embedding, embedding, sizeof(float) * 128);
+    strncpy(reg->id, id, 99);
+    reg->id[99] = '\0';
+    
+    return reg;
+}
+
+// Compara dois registros em uma dimensão específica
+int comparar_faces(void *a, void *b, int dimensao) {
+    float diff = ((FaceRegistro*)a)->embedding[dimensao] - ((FaceRegistro*)b)->embedding[dimensao];
+    return (diff < 0) ? -1 : (diff > 0) ? 1 : 0;
+}
+
+// Calcula distância euclidiana quadrada entre duas faces
+double distancia_faces(void *a, void *b) {
     double soma = 0.0;
     for (int i = 0; i < 128; i++) {
-        double diff = p1->features[i] - p2->features[i];
+        double diff = ((FaceRegistro*)a)->embedding[i] - ((FaceRegistro*)b)->embedding[i];
         soma += diff * diff;
     }
     return soma;
 }
 
-// Compara duas pessoas na dimensão pos
-int comparar_dimensao(Pessoa* p1, Pessoa* p2, int pos) {
-    if (p1->features[pos] < p2->features[pos]) return -1;
-    if (p1->features[pos] > p2->features[pos]) return 1;
-    return 0;
+// ==================== OPERAÇÕES DA KD-TREE ====================
+
+// Inicializa uma nova KD-Tree
+void kdtree_inicializar(KDTree *arv, int dimensoes) {
+    arv->raiz = NULL;
+    arv->comparador = comparar_faces;
+    arv->distancia = distancia_faces;
+    arv->dimensoes = dimensoes;
 }
 
-// Cria uma nova pessoa
-Pessoa* criar_pessoa(float features[], const char* nome) {
-    Pessoa* nova = malloc(sizeof(Pessoa));
-    memcpy(nova->features, features, sizeof(float) * 128);
-    strncpy(nova->nome, nome, 99);
-    nova->nome[99] = '\0';
-    return nova;
+// Função auxiliar recursiva para inserção
+void _kdtree_inserir(TreeNode **no, void *chave, int profundidade, KDTree *arv) {
+    if (*no == NULL) {
+        *no = malloc(sizeof(TreeNode));
+        (*no)->key = chave;
+        (*no)->esq = NULL;
+        (*no)->dir = NULL;
+    } else {
+        int dim = profundidade % arv->dimensoes;
+        if (arv->comparador((*no)->key, chave, dim) < 0) {
+            _kdtree_inserir(&(*no)->dir, chave, profundidade + 1, arv);
+        } else {
+            _kdtree_inserir(&(*no)->esq, chave, profundidade + 1, arv);
+        }
+    }
 }
 
-/* =======================================
-   Funções da MinHeap
-   ======================================= */
+// Insere um novo registro na árvore
+void kdtree_inserir(KDTree *arv, void *chave) {
+    _kdtree_inserir(&arv->raiz, chave, 0, arv);
+}
 
-// Cria uma MinHeap com capacidade dada
-MinHeap* inicializar_heap(int capacidade) {
-    MinHeap* heap = malloc(sizeof(MinHeap));
-    heap->elementos = malloc(sizeof(ElementoHeap) * capacidade);
+// ==================== BUSCA DE VIZINHOS ====================
+
+// Estrutura para armazenar os N vizinhos mais próximos
+typedef struct {
+    double *distancias;    // Array de distâncias
+    FaceRegistro **faces;  // Array de ponteiros para registros
+    int capacidade;        // Número máximo de vizinhos
+    int tamanho;           // Número atual de vizinhos
+} HeapVizinhos;
+
+// Inicializa o heap de vizinhos
+void heap_inicializar(HeapVizinhos *heap, int capacidade) {
+    heap->distancias = malloc(sizeof(double) * capacidade);
+    heap->faces = malloc(sizeof(FaceRegistro*) * capacidade);
     heap->capacidade = capacidade;
     heap->tamanho = 0;
-    return heap;
 }
 
-// Libera a MinHeap
-void destruir_heap(MinHeap* heap) {
-    free(heap->elementos);
-    free(heap);
-}
-
-// Troca dois elementos no heap
-void trocar_elementos(ElementoHeap* a, ElementoHeap* b) {
-    ElementoHeap temp = *a;
-    *a = *b;
-    *b = temp;
-}
-
-// Ajusta heap para manter propriedade de max-heap
-void ajustar_heap_acima(MinHeap* heap, int indice) {
-    while (indice > 0) {
-        int pai = (indice - 1) / 2;
-        if (heap->elementos[indice].distancia > heap->elementos[pai].distancia) {
-            trocar_elementos(&heap->elementos[indice], &heap->elementos[pai]);
-            indice = pai;
-        } else {
-            break;
-        }
-    }
-}
-
-void ajustar_heap_abaixo(MinHeap* heap, int indice) {
-    while (1) {
-        int maior = indice;
-        int esq = 2 * indice + 1;
-        int dir = 2 * indice + 2;
-
-        if (esq < heap->tamanho && heap->elementos[esq].distancia > heap->elementos[maior].distancia)
-            maior = esq;
-        if (dir < heap->tamanho && heap->elementos[dir].distancia > heap->elementos[maior].distancia)
-            maior = dir;
-
-        if (maior != indice) {
-            trocar_elementos(&heap->elementos[indice], &heap->elementos[maior]);
-            indice = maior;
-        } else {
-            break;
-        }
-    }
-}
-
-// Insere na MinHeap
-void inserir_na_heap(MinHeap* heap, double distancia, Pessoa* pessoa) {
+// Adiciona um vizinho ao heap (mantém os mais próximos)
+void heap_adicionar_vizinho(HeapVizinhos *heap, double dist, FaceRegistro *face) {
     if (heap->tamanho < heap->capacidade) {
-        heap->elementos[heap->tamanho].distancia = distancia;
-        heap->elementos[heap->tamanho].pessoa = pessoa;
-        ajustar_heap_acima(heap, heap->tamanho);
+        // Heap não está cheio, simplesmente adiciona
+        heap->distancias[heap->tamanho] = dist;
+        heap->faces[heap->tamanho] = face;
         heap->tamanho++;
-    } else if (distancia < heap->elementos[0].distancia) {
-        heap->elementos[0].distancia = distancia;
-        heap->elementos[0].pessoa = pessoa;
-        ajustar_heap_abaixo(heap, 0);
-    }
-}
-
-/* =======================================
-   Funções da KD-Tree
-   ======================================= */
-
-// Insere recursivamente na árvore
-void inserir_kd_recursivo(KDNo** raiz, Pessoa* pessoa, int profundidade, int dimensao) {
-    if (*raiz == NULL) {
-        *raiz = malloc(sizeof(KDNo));
-        (*raiz)->pessoa = pessoa;
-        (*raiz)->esquerda = NULL;
-        (*raiz)->direita = NULL;
-    } else {
-        int pos = profundidade % dimensao;
-        if (comparar_dimensao(pessoa, (*raiz)->pessoa, pos) < 0) {
-            inserir_kd_recursivo(&(*raiz)->esquerda, pessoa, profundidade + 1, dimensao);
-        } else {
-            inserir_kd_recursivo(&(*raiz)->direita, pessoa, profundidade + 1, dimensao);
+        
+        // Reorganiza o heap
+        int i = heap->tamanho - 1;
+        while (i > 0 && heap->distancias[i] > heap->distancias[(i-1)/2]) {
+            // Troca com o pai
+            double temp_dist = heap->distancias[i];
+            FaceRegistro *temp_face = heap->faces[i];
+            
+            heap->distancias[i] = heap->distancias[(i-1)/2];
+            heap->faces[i] = heap->faces[(i-1)/2];
+            
+            heap->distancias[(i-1)/2] = temp_dist;
+            heap->faces[(i-1)/2] = temp_face;
+            
+            i = (i-1)/2;
+        }
+    } else if (dist < heap->distancias[0]) {
+        // Substitui o vizinho mais distante se o novo for mais próximo
+        heap->distancias[0] = dist;
+        heap->faces[0] = face;
+        
+        // Reorganiza o heap
+        int i = 0;
+        while (1) {
+            int maior = i;
+            int esq = 2*i + 1;
+            int dir = 2*i + 2;
+            
+            if (esq < heap->tamanho && heap->distancias[esq] > heap->distancias[maior])
+                maior = esq;
+            if (dir < heap->tamanho && heap->distancias[dir] > heap->distancias[maior])
+                maior = dir;
+                
+            if (maior == i) break;
+            
+            // Troca com o maior filho
+            double temp_dist = heap->distancias[i];
+            FaceRegistro *temp_face = heap->faces[i];
+            
+            heap->distancias[i] = heap->distancias[maior];
+            heap->faces[i] = heap->faces[maior];
+            
+            heap->distancias[maior] = temp_dist;
+            heap->faces[maior] = temp_face;
+            
+            i = maior;
         }
     }
 }
 
-// Insere na árvore
-void inserir_na_kdtree(KDArvore* arvore, Pessoa* pessoa) {
-    inserir_kd_recursivo(&arvore->raiz, pessoa, 0, arvore->dimensao);
-}
-
-// Busca os K vizinhos mais próximos
-void buscar_knn_recursivo(KDNo* no, Pessoa* consulta, int profundidade, int dimensao, MinHeap* heap) {
+// Busca recursiva pelos N vizinhos mais próximos
+void _buscar_vizinhos(KDTree *arv, TreeNode *no, FaceRegistro *consulta, int profundidade, 
+                     HeapVizinhos *heap) {
     if (no == NULL) return;
-
-    double dist = calcular_distancia(consulta, no->pessoa);
-    inserir_na_heap(heap, dist, no->pessoa);
-
-    int pos = profundidade % dimensao;
-    int comp = comparar_dimensao(consulta, no->pessoa, pos);
-
-    KDNo* principal = comp < 0 ? no->esquerda : no->direita;
-    KDNo* oposto = comp < 0 ? no->direita : no->esquerda;
-
-    buscar_knn_recursivo(principal, consulta, profundidade + 1, dimensao, heap);
-
-    double diff = consulta->features[pos] - no->pessoa->features[pos];
-    if (heap->tamanho < heap->capacidade || (diff * diff) < heap->elementos[0].distancia) {
-        buscar_knn_recursivo(oposto, consulta, profundidade + 1, dimensao, heap);
+    
+    // Calcula distância até o nó atual
+    double dist = arv->distancia(no->key, consulta);
+    printf("%s dist %.3f menor_dist %.3f comp %d\n", 
+           ((FaceRegistro*)no->key)->id, dist, 
+           (heap->tamanho > 0) ? heap->distancias[0] : dist,
+           arv->comparador(consulta, no->key, profundidade % arv->dimensoes));
+    
+    // Adiciona ao heap se for um dos N mais próximos
+    heap_adicionar_vizinho(heap, dist, (FaceRegistro*)no->key);
+    
+    int dim = profundidade % arv->dimensoes;
+    int comp = arv->comparador(consulta, no->key, dim);
+    
+    // Decide qual subárvore explorar primeiro
+    TreeNode *primeiro = comp < 0 ? no->esq : no->dir;
+    TreeNode *segundo = comp < 0 ? no->dir : no->esq;
+    
+    _buscar_vizinhos(arv, primeiro, consulta, profundidade + 1, heap);
+    
+    // Verifica se precisa explorar a outra subárvore
+    float diff = consulta->embedding[dim] - ((FaceRegistro*)no->key)->embedding[dim];
+    if (heap->tamanho < heap->capacidade || diff * diff < heap->distancias[0]) {
+        printf("tentando do outro lado %d\n", (int)(diff * diff));
+        _buscar_vizinhos(arv, segundo, consulta, profundidade + 1, heap);
     }
 }
 
-// Busca os K vizinhos mais próximos da consulta
-void buscar_k_vizinhos(KDArvore* arvore, Pessoa* consulta, Pessoa** vizinhos, int k) {
-    MinHeap* heap = inicializar_heap(k);
-    buscar_knn_recursivo(arvore->raiz, consulta, 0, arvore->dimensao, heap);
-
-    for (int i = 0; i < heap->tamanho; i++) {
-        vizinhos[i] = heap->elementos[i].pessoa;
+// Busca os N vizinhos mais próximos
+void buscar_n_vizinhos(KDTree *arv, FaceRegistro *consulta, int n, FaceRegistro **resultados) {
+    HeapVizinhos heap;
+    heap_inicializar(&heap, n);
+    
+    _buscar_vizinhos(arv, arv->raiz, consulta, 0, &heap);
+    
+    // Copia resultados para o array de saída
+    for (int i = 0; i < heap.tamanho; i++) {
+        resultados[i] = heap.faces[i];
     }
-
-    destruir_heap(heap);
+    
+    free(heap.distancias);
+    free(heap.faces);
 }
 
-/* =======================================
-   Função Principal de Teste
-   ======================================= */
+// ==================== TESTES ====================
+
+void testar_construcao() {
+    KDTree arv;
+    kdtree_inicializar(&arv, 2);
+    
+    float emb1[128] = {2.0, 3.0};
+    float emb2[128] = {1.0, 1.0};
+    
+    FaceRegistro *reg1 = criar_registro(emb1, "Dourados");
+    FaceRegistro *reg2 = criar_registro(emb2, "Campo Grande");
+    
+    assert(arv.raiz == NULL);
+    assert(arv.dimensoes == 2);
+    assert(arv.comparador(reg1, reg2, 0) == 1);
+    assert(arv.comparador(reg1, reg2, 1) == 1);
+    assert(strcmp(reg1->id, "Dourados") == 0);
+    assert(strcmp(reg2->id, "Campo Grande") == 0);
+    
+    free(reg1);
+    free(reg2);
+}
+
+void testar_busca() {
+    KDTree arv;
+    kdtree_inicializar(&arv, 2);
+    
+    float emb[128] = {0};
+    
+    emb[0] = 10; emb[1] = 10;
+    kdtree_inserir(&arv, criar_registro(emb, "a"));
+    
+    emb[0] = 20; emb[1] = 20;
+    kdtree_inserir(&arv, criar_registro(emb, "b"));
+    
+    emb[0] = 1; emb[1] = 10;
+    kdtree_inserir(&arv, criar_registro(emb, "c"));
+    
+    emb[0] = 3; emb[1] = 5;
+    kdtree_inserir(&arv, criar_registro(emb, "d"));
+    
+    emb[0] = 7; emb[1] = 15;
+    kdtree_inserir(&arv, criar_registro(emb, "e"));
+    
+    emb[0] = 4; emb[1] = 11;
+    kdtree_inserir(&arv, criar_registro(emb, "f"));
+    
+    // Testes de busca
+    float emb_busca[128] = {7, 14};
+    FaceRegistro *consulta = criar_registro(emb_busca, "x");
+    FaceRegistro *resultados[1];
+    
+    buscar_n_vizinhos(&arv, consulta, 1, resultados);
+    assert(strcmp(resultados[0]->id, "e") == 0);
+    
+    // Limpeza
+    free(consulta);
+    // (Implementar função de destruição da árvore para liberar memória)
+}
 
 int main() {
-    KDArvore arvore;
-    arvore.raiz = NULL;
-    arvore.dimensao = 128;
-
-    // Criar vetores fictícios
-    float v1[128], v2[128], v3[128], vq[128];
-    for (int i = 0; i < 128; i++) {
-        v1[i] = 0.1f + i * 0.001f;
-        v2[i] = 0.2f + i * 0.001f;
-        v3[i] = 0.5f + i * 0.002f;
-        vq[i] = 0.15f + i * 0.001f;
-    }
-
-    Pessoa* p1 = criar_pessoa(v1, "Individuo_A");
-    Pessoa* p2 = criar_pessoa(v2, "Individuo_B");
-    Pessoa* p3 = criar_pessoa(v3, "Individuo_C");
-
-    inserir_na_kdtree(&arvore, p1);
-    inserir_na_kdtree(&arvore, p2);
-    inserir_na_kdtree(&arvore, p3);
-
-    printf("3 registros foram inseridos na árvore KD.\n");
-
-    Pessoa consulta;
-    memcpy(consulta.features, vq, sizeof(vq));
-    strcpy(consulta.nome, "Consulta");
-
-    int k = 2;
-    Pessoa* vizinhos[k];
-
-    buscar_k_vizinhos(&arvore, &consulta, vizinhos, k);
-
-    printf("Os %d vizinhos mais próximos de %s são:\n", k, consulta.nome);
-    for (int i = 0; i < k; i++) {
-        double dist = sqrt(calcular_distancia(&consulta, vizinhos[i]));
-        printf("%d: %s (Distância: %.4f)\n", i + 1, vizinhos[i]->nome, dist);
-    }
-
+    testar_construcao();
+    testar_busca();
+    printf("SUCCESS!!\n");
     return 0;
 }
