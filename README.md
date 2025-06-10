@@ -1,224 +1,128 @@
 # ED-UFMS
 Estruturas de Dados UFMS 
-Trabalho 1 - Sistema de Reconhecimento Facial com KDTree
-Visão Geral do Projeto
-Este projeto implementa um sistema completo de reconhecimento facial utilizando:
+Trabalho 1 - Análise e Documentação do Sistema de Reconhecimento Facial com KDTree
+1. Visão Geral do Sistema
+O sistema desenvolvido implementa um mecanismo de reconhecimento facial utilizando embeddings faciais armazenados em uma estrutura KDTree. A solução consiste em três componentes principais:
 
-DeepFace para extração de embeddings faciais
+Biblioteca C: Implementa a KDTree otimizada para armazenar e buscar embeddings faciais
 
-KDTree (Árvore k-dimensional) para armazenamento e busca eficiente
+API FastAPI: Interface REST para interação com a KDTree
 
-FastAPI para disponibilizar uma API REST
+Scripts de processamento: Para extração de embeddings e teste do sistema
 
-Google Colab para processamento inicial dos dados
+2. Alterações Implementadas na KDTree
+2.1 Estrutura de Dados Modificada
+A estrutura original para coordenadas geográficas foi substituída por uma estrutura adequada para embeddings faciais:
 
-Estrutura do Projeto
-text
-/projeto
-│
-├── app.py               # API FastAPI para reconhecimento facial
-├── kdtree_wrapper.py    # Wrapper Python para a KDTree em C
-├── kdtree.c             # Implementação da KDTree em C
-├── colab.py             # Script para extração de embeddings no Colab
-├── test.py              # Testes para a API
-└── README.md            # Documentação do projeto
-Componentes Principais
-1. colab.py - Extração de Embeddings
-Funcionalidades:
+// Estrutura original (coordenadas)
+typedef struct _reg {
+    int lat;
+    int lon;
+    char nome[100];
+} treg;
 
-Processa o dataset LFW (Labeled Faces in the Wild)
+// Nova estrutura (embeddings faciais)
+typedef struct _reg {
+    float embedding[128];  // Vetor de características da face
+    char id[100];          // Identificador da pessoa
+} treg;
 
-Extrai embeddings faciais usando DeepFace
 
-Armazena resultados em formato Parquet
-
-Fluxo de Trabalho:
-
-Monta o Google Drive
-
-Acessa o dataset em /content/drive/MyDrive/TestT1ED/Lfw_funneled
-
-Processa até 1000 imagens (1 por pessoa)
-
-Extrai embeddings com modelos Facenet ou VGG-Face
-
-Salva em /content/drive/MyDrive/TestT1ED/embeddings.parquet
-
-Configurações:
-
-Modelos alternativos em caso de falha
-
-Limite configurável de imagens
-
-Tratamento robusto de erros
-
-2. kdtree.c - Implementação da KDTree
-Estruturas de Dados:
-
-c
-typedef struct {
-    float embedding[128];  // Vetor de características
-    char id[100];          // Identificador
-} FaceRegistro;
-
-typedef struct TreeNode {
-    void *key;            // Ponteiro para registro
-    struct TreeNode *esq; // Subárvore esquerda
-    struct TreeNode *dir; // Subárvore direita
-} TreeNode;
+2.2 Implementação do Heap para Busca de N Vizinhos
+Foi adicionado um sistema de heap mínimo para retornar os N vizinhos mais próximos:
 
 typedef struct {
-    TreeNode *raiz;       // Raiz da árvore
-    int dimensoes;        // Número de dimensões (128)
-    // Funções de comparação e distância
-} KDTree;
-Funcionalidades Implementadas:
+    double *distancias;
+    treg **vizinhos;
+    int capacidade;
+    int tamanho;
+} heap_vizinhos;
 
-Inserção balanceada de nós
+void heap_init(heap_vizinhos *heap, int capacidade);
+void heap_push(heap_vizinhos *heap, double dist, treg *vizinho);
+void _kdtree_busca_n(tarv *arv, tnode *atual, void *key, int profund, heap_vizinhos *heap);
 
-Busca por vizinho mais próximo
 
-Busca dos N vizinhos mais próximos (com heap)
+3. Fluxo de Trabalho do Sistema
+Extrair embeddings faciais (colab.py):
 
-Função de distância euclidiana quadrada
+Processa imagens do dataset LFW
 
-Otimizações:
+Usa DeepFace para gerar embeddings de 128 dimensões
 
-Busca em O(log n) no caso médio
+Armazena em arquivo Parquet
 
-Heap para manutenção dos melhores resultados
+Construir a KDTree (app.py):
 
-Podas na busca para melhor performance
+Inicializa a estrutura da árvore
 
-3. kdtree_wrapper.py - Interface Python/C
-Componentes:
+Configura funções de comparação e distância
 
-Definições de estruturas compatíveis com o C
+Inserir faces:
 
-Tipos de dados para a interface
+Cada embedding é inserido na árvore com um ID associado
 
-Wrapper com métodos Pythonicos:
-
-python
-class KDTreeWrapper:
-    def insert_face(self, embedding: list, face_id: str):
-        """Insere uma face na árvore"""
-    
-    def search_faces(self, embedding: list, n: int = 5):
-        """Busca n faces similares"""
-4. app.py - API FastAPI
-Endpoints:
-
-POST /build-tree: Constrói a árvore vazia
-
-POST /insert-face: Insere um novo embedding
-
-POST /search-faces: Busca faces similares
-
-Validações:
-
-Embeddings devem ter 128 dimensões
-
-IDs limitados a 100 caracteres
-
-Tratamento de erros detalhado
-
-Modelos Pydantic:
-
-python
-class FaceInput(BaseModel):
-    embedding: List[float]
-    id: str
-
-class FaceSearchResult(BaseModel):
-    id: str
-    similarity: float
-5. test.py - Testes da API
-Casos de Teste:
-
-Construção da árvore
-
-Inserção de 100 faces de exemplo
-
-Busca por similaridade
-
-Funcionalidades:
-
-Carga de embeddings do arquivo Parquet
-
-Testes automatizados com tratamento de erros
-
-Relatório de resultados
-
-Como Executar o Projeto
-Pré-requisitos
-Python 3.8+
-
-Google Colab (para extração inicial)
-
-Biblioteca DeepFace
-
-FastAPI
-
-Pandas
-
-ctypes
-
-Passo a Passo
-Extrair embeddings (Colab):
-
-bash
-python colab.py
-Compilar a KDTree:
-
-bash
-gcc -c -fpic kdtree.c
-gcc -shared -o libkdtree.so kdtree.o
-Iniciar a API:
-
-bash
-uvicorn app:app --reload
-Executar testes:
-
-bash
-python test.py
-Exemplo de Uso
-Inserir uma face:
-
-python
-import requests
-
-data = {
-    "embedding": [0.1, 0.2, ...], # 128 valores
-    "id": "pessoa1"
-}
-
-response = requests.post("http://localhost:8000/insert-face", json=data)
 Buscar faces similares:
 
-python
+Dado um embedding de consulta, retorna os N vizinhos mais próximos
+
+4. Testes e Validação
+O sistema inclui três níveis de teste:
+
+Testes unitários em C (kdtree.c):
+
+Verificam construção da árvore
+
+Validam operações de inserção e busca
+
+Testes de API (test.py):
+
+Verificam integração entre Python e C
+
+Testam endpoints REST
+
+Validação com dataset real:
+
+Usa imagens do LFW dataset
+
+Verifica reconhecimento correto de faces conhecidas
+
+5. Exemplo de Uso
+# 1. Construir a árvore
+response = requests.post("http://127.0.0.1:8000/construir-arvore")
+
+# 2. Inserir faces
+for nome, embedding in zip(nomes, embeddings):
+    payload = {
+        "embedding": embedding,
+        "id": nome
+    }
+    requests.post("http://127.0.0.1:8000/inserir-face", json=payload)
+
+# 3. Buscar faces similares
 response = requests.post(
-    "http://localhost:8000/search-faces",
-    json=[0.1, 0.2, ...], # Embedding de consulta
+    "http://127.0.0.1:8000/buscar-faces",
+    json=embedding_consulta,
     params={"n": 5}
 )
-Considerações Finais
-Desafios Resolvidos:
 
-Integração Python/C com ctypes
+6. Conclusão e Melhorias Futuras
+O sistema foi refatorado com sucesso para:
 
-Busca eficiente em alta dimensionalidade
+Suportar vetores de alta dimensionalidade (128D)
 
-Processamento de grandes volumes de imagens
+Implementar busca eficiente de múltiplos vizinhos
 
-Possíveis Melhorias:
+Manter boa performance mesmo com milhares de registros
 
-Persistência da árvore em disco
+Melhorias potenciais:
 
-Balanceamento automático
+Adicionar persistência da árvore em disco
 
-Suporte a atualização/remoção
+Implementar balanceamento automático
 
-API assíncrona
+Adicionar suporte a atualização/remoção de registros
 
-Este projeto demonstra uma aplicação prática de estruturas de dados avançadas (KDTree) combinada com técnicas modernas de visão computacional para resolver um problema real de reconhecimento facial de forma eficiente.
+Melhorar tratamento de erros na API
+
+O projeto demonstra como estruturas de dados especializadas (como a KDTree) podem ser adaptadas para aplicações modernas de visão computacional, mantendo eficiência mesmo com grandes volumes de dados.
