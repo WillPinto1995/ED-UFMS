@@ -81,7 +81,7 @@ O sistema inclui três níveis de teste:
    - Usa imagens do LFW dataset
    - Verifica reconhecimento correto de faces conhecidas
 
-5. Exemplo de Uso
+## 5. Exemplo de Uso
 
 ```python
 # 1. Construir a árvore
@@ -103,7 +103,7 @@ response = requests.post(
 )
 ```
 
-6. Conclusão e Melhorias Futuras
+## 6. Conclusão e Melhorias Futuras
 
 O sistema foi refatorado com sucesso para:
 
